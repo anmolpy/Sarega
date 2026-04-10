@@ -1,5 +1,5 @@
 import { useLocation } from 'wouter';
-import { Home, FileText, Mic, LayoutGrid, Settings } from 'lucide-react';
+import { Home, FileText, Mic, LayoutGrid } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { ReactNode } from 'react';
 
@@ -8,7 +8,6 @@ const navItems = [
   { path: '/notes', label: 'Notes', icon: FileText },
   { path: '/record', label: 'Record', icon: Mic },
   { path: '/drummer', label: 'Drummer', icon: LayoutGrid },
-  { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
 interface LayoutProps {

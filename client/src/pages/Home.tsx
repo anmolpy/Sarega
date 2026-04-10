@@ -74,7 +74,7 @@ export default function Home() {
               Your Musical Journal
             </p>
             <h1 className="text-4xl md:text-5xl tracking-tight text-foreground leading-tight">
-              TrackNotes
+              Sarega
             </h1>
             <p className="text-muted-foreground mt-2 max-w-md text-sm leading-relaxed" style={{ fontFamily: 'var(--font-sans)' }}>
               Capture melodies, lyrics, rhythms, and chords — all in one place.

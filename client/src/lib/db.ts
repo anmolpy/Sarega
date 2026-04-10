@@ -1,5 +1,5 @@
 /**
- * IndexedDB Storage Layer for TrackNotes
+ * IndexedDB Storage Layer for Sarega
  * Uses the `idb` library for a promise-based API over IndexedDB.
  * Stores: notes (metadata + content), audio blobs, drum patterns, chord sheets
  */
@@ -52,7 +52,7 @@ export type Note = VoiceMemoNote | InstrumentNote | DrumPatternNote | TextNote |
 
 // ── DB Schema ──────────────────────────────────────────────────────────
 
-interface TrackNotesDB extends DBSchema {
+interface SaregaDB extends DBSchema {
   notes: {
     key: string;
     value: Note;
@@ -65,11 +65,11 @@ interface TrackNotesDB extends DBSchema {
 
 // ── DB Instance ────────────────────────────────────────────────────────
 
-let dbPromise: Promise<IDBPDatabase<TrackNotesDB>> | null = null;
+let dbPromise: Promise<IDBPDatabase<SaregaDB>> | null = null;
 
-function getDB(): Promise<IDBPDatabase<TrackNotesDB>> {
+function getDB(): Promise<IDBPDatabase<SaregaDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<TrackNotesDB>('tracknotes-db', 1, {
+    dbPromise = openDB<SaregaDB>('sarega-db', 1, {
       upgrade(db) {
         const store = db.createObjectStore('notes', { keyPath: 'id' });
         store.createIndex('by-type', 'type');

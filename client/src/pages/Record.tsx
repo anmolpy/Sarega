@@ -8,15 +8,29 @@
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useSearch } from 'wouter';
-import { Mic, Guitar, Circle, Square, Play, Pause, Save, ArrowLeft, RotateCcw } from 'lucide-react';
+import {
+  Mic,
+  Guitar,
+  Circle,
+  Square,
+  Play,
+  Pause,
+  Save,
+  ArrowLeft,
+  RotateCcw,
+  Gauge,
+} from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
 import { saveNote, type VoiceMemoNote, type InstrumentNote } from '@/lib/db';
 import { generateId } from '@/lib/noteHelpers';
 import { toast } from 'sonner';
+import { detectPitch, hzToNote, type NoteReading } from '@/lib/pitch';
 
 type RecordType = 'voice' | 'instrument';
+
+type TunerDisplay = { hz: number; note: NoteReading };
 
 export default function Record() {
   const [, navigate] = useLocation();
@@ -32,6 +46,8 @@ export default function Record() {
   const [duration, setDuration] = useState(0);
   const [title, setTitle] = useState('');
   const [tagsInput, setTagsInput] = useState('');
+  const [tunerOn, setTunerOn] = useState(false);
+  const [tunerDisplay, setTunerDisplay] = useState<TunerDisplay | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -41,6 +57,15 @@ export default function Record() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const floatTimeDataRef = useRef<Float32Array | null>(null);
+  const lastPitchUiRef = useRef(0);
+  const pitchFrameRef = useRef(0);
+  const tunerStreamRef = useRef<MediaStream | null>(null);
+  const tunerContextRef = useRef<AudioContext | null>(null);
+  const tunerOnlyAnalyserRef = useRef<AnalyserNode | null>(null);
+  const tunerAnimRef = useRef<number>(0);
+  const tunerOnRef = useRef(false);
+  tunerOnRef.current = tunerOn;
 
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
@@ -50,12 +75,31 @@ export default function Record() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
+    const timeDomainLength = analyser.fftSize;
+    const dataArray = new Uint8Array(timeDomainLength);
+    if (!floatTimeDataRef.current || floatTimeDataRef.current.length !== analyser.fftSize) {
+      floatTimeDataRef.current = new Float32Array(analyser.fftSize);
+    }
+    const floatBuf = floatTimeDataRef.current;
 
     const draw = () => {
       animFrameRef.current = requestAnimationFrame(draw);
       analyser.getByteTimeDomainData(dataArray);
+
+      if (tunerOnRef.current) {
+        pitchFrameRef.current += 1;
+        if (pitchFrameRef.current % 2 === 0) {
+          analyser.getFloatTimeDomainData(floatBuf as Parameters<AnalyserNode['getFloatTimeDomainData']>[0]);
+          const sr = audioContextRef.current?.sampleRate ?? 48000;
+          const hz = detectPitch(floatBuf, sr);
+          const now = performance.now();
+          if (now - lastPitchUiRef.current > 55) {
+            lastPitchUiRef.current = now;
+            if (hz < 0) setTunerDisplay(null);
+            else setTunerDisplay({ hz, note: hzToNote(hz) });
+          }
+        }
+      }
 
       ctx.fillStyle = 'oklch(0.15 0.005 250)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -67,10 +111,10 @@ export default function Record() {
       ctx.shadowBlur = 4;
       ctx.beginPath();
 
-      const sliceWidth = canvas.width / bufferLength;
+      const sliceWidth = canvas.width / timeDomainLength;
       let x = 0;
 
-      for (let i = 0; i < bufferLength; i++) {
+      for (let i = 0; i < timeDomainLength; i++) {
         const v = dataArray[i] / 128.0;
         const y = (v * canvas.height) / 2;
         if (i === 0) ctx.moveTo(x, y);
@@ -88,12 +132,20 @@ export default function Record() {
 
   const startRecording = async () => {
     try {
+      cancelAnimationFrame(tunerAnimRef.current);
+      tunerAnimRef.current = 0;
+      tunerStreamRef.current?.getTracks().forEach((t) => t.stop());
+      tunerStreamRef.current = null;
+      tunerOnlyAnalyserRef.current = null;
+      void tunerContextRef.current?.close();
+      tunerContextRef.current = null;
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
+      analyser.fftSize = 4096;
       source.connect(analyser);
       analyserRef.current = analyser;
 
@@ -184,6 +236,67 @@ export default function Record() {
   };
 
   useEffect(() => {
+    if (!tunerOn) setTunerDisplay(null);
+  }, [tunerOn]);
+
+  useEffect(() => {
+    if (!tunerOn || isRecording) return;
+
+    let cancelled = false;
+    const floatBuf = new Float32Array(4096);
+
+    const loop = () => {
+      if (cancelled) return;
+      tunerAnimRef.current = requestAnimationFrame(loop);
+      const analyser = tunerOnlyAnalyserRef.current;
+      const ctx = tunerContextRef.current;
+      if (!analyser || !ctx) return;
+      analyser.getFloatTimeDomainData(floatBuf as Parameters<AnalyserNode['getFloatTimeDomainData']>[0]);
+      const hz = detectPitch(floatBuf, ctx.sampleRate);
+      const now = performance.now();
+      if (now - lastPitchUiRef.current > 55) {
+        lastPitchUiRef.current = now;
+        if (hz < 0) setTunerDisplay(null);
+        else setTunerDisplay({ hz, note: hzToNote(hz) });
+      }
+    };
+
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        const ctx = new AudioContext();
+        await ctx.resume();
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 4096;
+        source.connect(analyser);
+        tunerStreamRef.current = stream;
+        tunerContextRef.current = ctx;
+        tunerOnlyAnalyserRef.current = analyser;
+        tunerAnimRef.current = requestAnimationFrame(loop);
+      } catch {
+        toast.error('Could not access microphone for tuner.');
+        setTunerOn(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(tunerAnimRef.current);
+      tunerAnimRef.current = 0;
+      tunerStreamRef.current?.getTracks().forEach((t) => t.stop());
+      tunerStreamRef.current = null;
+      tunerOnlyAnalyserRef.current = null;
+      void tunerContextRef.current?.close();
+      tunerContextRef.current = null;
+    };
+  }, [tunerOn, isRecording]);
+
+  useEffect(() => {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
@@ -191,6 +304,9 @@ export default function Record() {
         audioElRef.current.pause();
         audioElRef.current = null;
       }
+      cancelAnimationFrame(tunerAnimRef.current);
+      tunerStreamRef.current?.getTracks().forEach((t) => t.stop());
+      void tunerContextRef.current?.close();
     };
   }, []);
 
@@ -246,6 +362,98 @@ export default function Record() {
               </button>
             );
           })}
+        </div>
+
+        {/* Chromatic tuner */}
+        <div className="bg-card rounded-lg border border-border/50 p-4 mb-6">
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <div className="flex items-center gap-2">
+              <Gauge size={18} className="text-muted-foreground shrink-0" />
+              <span className="text-sm font-medium text-foreground" style={{ fontFamily: 'var(--font-sans)' }}>
+                Chromatic tuner
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTunerOn((v) => !v)}
+              className={`text-xs px-3 py-1.5 rounded-md border transition-colors shrink-0 ${
+                tunerOn
+                  ? 'border-foreground/20 bg-foreground/10 text-foreground'
+                  : 'border-border/50 bg-secondary/50 text-muted-foreground hover:text-foreground'
+              }`}
+              style={{ fontFamily: 'var(--font-mono)' }}
+            >
+              {tunerOn ? 'On' : 'Off'}
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mb-4" style={{ fontFamily: 'var(--font-sans)' }}>
+            {isRecording
+              ? 'Uses the same microphone as recording. Turn on to see pitch while you capture.'
+              : tunerOn
+                ? 'Play or sing a steady note. Center the needle for correct pitch (A4 = 440 Hz).'
+                : 'Turn on to tune your instrument or check your vocal pitch before recording.'}
+          </p>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-5">
+            <div className="flex items-baseline gap-1 min-w-[6.5rem]">
+              {tunerDisplay ? (
+                <>
+                  <span
+                    className="text-5xl font-light tracking-tight text-foreground"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  >
+                    {tunerDisplay.note.name}
+                  </span>
+                  <span className="text-2xl text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {tunerDisplay.note.octave}
+                  </span>
+                </>
+              ) : (
+                <span className="text-3xl text-muted-foreground/50" style={{ fontFamily: 'var(--font-mono)' }}>
+                  —
+                </span>
+              )}
+            </div>
+            <div className="flex-1 min-w-0 space-y-1">
+              <div
+                className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-wider"
+                style={{ fontFamily: 'var(--font-mono)' }}
+              >
+                <span>Flat</span>
+                <span>{tunerDisplay ? `${Math.round(tunerDisplay.hz)} Hz` : '\u00a0'}</span>
+                <span>Sharp</span>
+              </div>
+              <div className="relative h-3 rounded-full bg-secondary border border-border/40 overflow-hidden">
+                <div
+                  className="absolute inset-y-0 w-px bg-foreground/25 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
+                  aria-hidden
+                />
+                <div
+                  className="absolute inset-y-0 rounded-full transition-[left,background-color] duration-75 ease-out pointer-events-none"
+                  style={{
+                    left: tunerDisplay
+                      ? `${Math.max(0, Math.min(100, 50 + Math.max(-50, Math.min(50, tunerDisplay.note.cents))))}%`
+                      : '50%',
+                    width: '4px',
+                    transform: 'translateX(-50%)',
+                    backgroundColor:
+                      tunerDisplay && Math.abs(tunerDisplay.note.cents) < 5
+                        ? 'oklch(0.62 0.16 145)'
+                        : recordType === 'voice'
+                          ? 'oklch(0.60 0.18 255)'
+                          : 'oklch(0.68 0.16 55)',
+                  }}
+                />
+              </div>
+              <p
+                className="text-center text-xs text-muted-foreground tabular-nums min-h-[1rem]"
+                style={{ fontFamily: 'var(--font-mono)' }}
+              >
+                {tunerDisplay
+                  ? `${tunerDisplay.note.cents > 0 ? '+' : ''}${tunerDisplay.note.cents.toFixed(0)} cents`
+                  : '\u00a0'}
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Waveform canvas */}

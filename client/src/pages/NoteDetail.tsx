@@ -5,34 +5,28 @@
  * - Audio notes: playback bar with faux waveform
  * - Drum notes: read-only grid preview with play button
  * - Text/Chord notes: rendered text with edit mode
- * - AI "Enhance" button
  */
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useLocation } from 'wouter';
 import {
-  ArrowLeft, Play, Pause, Square, Sparkles, X, Pencil, Save, Loader2, Trash2, Plus,
+  ArrowLeft, Play, Pause, Square, X, Pencil, Save, Loader2, Trash2, Plus,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   getNoteById, saveNote, deleteNote, type Note, type TextNote, type ChordSheetNote,
   type DrumPatternNote, type VoiceMemoNote, type InstrumentNote,
 } from '@/lib/db';
 import { NOTE_TYPE_CONFIG, formatTimestamp, formatDuration, generateId } from '@/lib/noteHelpers';
 import NoteIcon from '@/components/NoteIcon';
-import { useSettings } from '@/contexts/SettingsContext';
-import {
-  callGemini, buildTextEnhancePrompt, buildChordEnhancePrompt, buildDrumEnhancePrompt,
-} from '@/lib/gemini';
 import { toast } from 'sonner';
 
 export default function NoteDetail() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
-  const { settings } = useSettings();
 
   const [note, setNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,10 +35,6 @@ export default function NoteDetail() {
   const [editTags, setEditTags] = useState('');
   const [editBody, setEditBody] = useState('');
   const [editLines, setEditLines] = useState<{ chord: string; lyrics: string }[]>([]);
-
-  // AI
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
 
   // Audio playback
   const [isPlaying, setIsPlaying] = useState(false);
@@ -231,34 +221,6 @@ export default function NoteDetail() {
     }
     if (Tone) Tone.Transport.stop();
     setDrumPlaying(false);
-  };
-
-  // AI Enhance
-  const handleAIEnhance = async () => {
-    if (!note) return;
-    if (!settings.geminiApiKey) {
-      toast.error('Set your Gemini API key in Settings first.');
-      return;
-    }
-    setAiLoading(true);
-    setAiSuggestion(null);
-    try {
-      let prompt = '';
-      if (note.type === 'text') prompt = buildTextEnhancePrompt(note.body);
-      else if (note.type === 'chord') prompt = buildChordEnhancePrompt(note.lines);
-      else if (note.type === 'drum') prompt = buildDrumEnhancePrompt(note.grid, note.instruments, note.bpm, note.swing);
-      else {
-        toast.info('AI enhancement is available for text, chord, and drum notes.');
-        setAiLoading(false);
-        return;
-      }
-      const result = await callGemini(prompt, settings.geminiApiKey);
-      setAiSuggestion(result);
-    } catch (err: any) {
-      toast.error(err.message || 'AI request failed');
-    } finally {
-      setAiLoading(false);
-    }
   };
 
   if (loading) {
@@ -565,47 +527,6 @@ export default function NoteDetail() {
           </div>
         )}
 
-        {/* AI Enhance */}
-        {(note.type === 'text' || note.type === 'chord' || note.type === 'drum') && !editing && (
-          <div className="mt-6">
-            <div className="staff-line mb-4" />
-            <Button
-              variant="outline"
-              onClick={handleAIEnhance}
-              disabled={aiLoading}
-              className="gap-2"
-            >
-              {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              {aiLoading ? 'Thinking...' : 'AI Enhance'}
-            </Button>
-
-            <AnimatePresence>
-              {aiSuggestion && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="mt-4 bg-card rounded-lg border border-border/50 p-4"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs tracking-[0.15em] uppercase text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
-                      AI Suggestion
-                    </span>
-                    <button
-                      onClick={() => setAiSuggestion(null)}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                  <pre className="whitespace-pre-wrap text-sm leading-relaxed text-foreground" style={{ fontFamily: 'var(--font-sans)' }}>
-                    {aiSuggestion}
-                  </pre>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
       </motion.div>
     </div>
   );
