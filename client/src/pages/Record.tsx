@@ -19,6 +19,7 @@ import {
   ArrowLeft,
   RotateCcw,
   Gauge,
+  CheckCircle2,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -31,6 +32,37 @@ import { detectPitch, hzToNote, type NoteReading } from '@/lib/pitch';
 type RecordType = 'voice' | 'instrument';
 
 type TunerDisplay = { hz: number; note: NoteReading };
+
+const TUNER_MIN_CENTS = -50;
+const TUNER_MAX_CENTS = 50;
+const TUNER_LEFT_ANGLE = 210;
+const TUNER_CENTER_ANGLE = 270;
+const TUNER_RIGHT_ANGLE = 330;
+const TUNER_TICK_VALUES = Array.from({ length: 21 }, (_, i) => -50 + i * 5);
+const TUNER_MAJOR_LABELS = new Set([-50, -30, -10, 0, 10, 30, 50]);
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function polarToCartesian(cx: number, cy: number, radius: number, angleDeg: number) {
+  const radians = (angleDeg * Math.PI) / 180;
+  return {
+    x: cx + radius * Math.cos(radians),
+    y: cy + radius * Math.sin(radians),
+  };
+}
+
+function describeArc(cx: number, cy: number, radius: number, startAngle: number, endAngle: number) {
+  const start = polarToCartesian(cx, cy, radius, endAngle);
+  const end = polarToCartesian(cx, cy, radius, startAngle);
+  const largeArc = endAngle - startAngle <= 180 ? '0' : '1';
+  return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 0 ${end.x} ${end.y}`;
+}
+
+function centsToAngle(cents: number): number {
+  return TUNER_CENTER_ANGLE + clamp(cents, TUNER_MIN_CENTS, TUNER_MAX_CENTS) * 1.2;
+}
 
 export default function Record() {
   const [, navigate] = useLocation();
@@ -60,11 +92,11 @@ export default function Record() {
   const floatTimeDataRef = useRef<Float32Array | null>(null);
   const lastPitchUiRef = useRef(0);
   const pitchFrameRef = useRef(0);
+  const tunerOnRef = useRef(false);
   const tunerStreamRef = useRef<MediaStream | null>(null);
   const tunerContextRef = useRef<AudioContext | null>(null);
   const tunerOnlyAnalyserRef = useRef<AnalyserNode | null>(null);
   const tunerAnimRef = useRef<number>(0);
-  const tunerOnRef = useRef(false);
   tunerOnRef.current = tunerOn;
 
   const drawWaveform = useCallback(() => {
@@ -134,7 +166,7 @@ export default function Record() {
     try {
       cancelAnimationFrame(tunerAnimRef.current);
       tunerAnimRef.current = 0;
-      tunerStreamRef.current?.getTracks().forEach((t) => t.stop());
+      tunerStreamRef.current?.getTracks().forEach((track) => track.stop());
       tunerStreamRef.current = null;
       tunerOnlyAnalyserRef.current = null;
       void tunerContextRef.current?.close();
@@ -153,15 +185,15 @@ export default function Record() {
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      mediaRecorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
       };
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
-        stream.getTracks().forEach((t) => t.stop());
+        stream.getTracks().forEach((track) => track.stop());
         if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       };
 
@@ -365,95 +397,194 @@ export default function Record() {
         </div>
 
         {/* Chromatic tuner */}
-        <div className="bg-card rounded-lg border border-border/50 p-4 mb-6">
-          <div className="flex items-center justify-between gap-4 mb-3">
-            <div className="flex items-center gap-2">
-              <Gauge size={18} className="text-muted-foreground shrink-0" />
-              <span className="text-sm font-medium text-foreground" style={{ fontFamily: 'var(--font-sans)' }}>
-                Chromatic tuner
-              </span>
-            </div>
+        <div className="bg-card rounded-3xl border border-border/50 p-4 mb-6 overflow-hidden bg-gradient-to-b from-card via-card to-secondary/10">
+          <div className="flex items-start justify-between gap-4 mb-2">
+            <span className="text-sm text-foreground/90" style={{ fontFamily: 'var(--font-sans)' }}>
+              A4 = 440Hz
+            </span>
+            <span className="text-sm text-[#8ab4ff]" style={{ fontFamily: 'var(--font-sans)' }}>
+              A5: 880Hz
+            </span>
             <button
               type="button"
               onClick={() => setTunerOn((v) => !v)}
-              className={`text-xs px-3 py-1.5 rounded-md border transition-colors shrink-0 ${
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors shrink-0 ${
                 tunerOn
                   ? 'border-foreground/20 bg-foreground/10 text-foreground'
                   : 'border-border/50 bg-secondary/50 text-muted-foreground hover:text-foreground'
               }`}
-              style={{ fontFamily: 'var(--font-mono)' }}
+              aria-label={tunerOn ? 'Turn tuner off' : 'Turn tuner on'}
             >
-              {tunerOn ? 'On' : 'Off'}
+              <Gauge size={15} />
             </button>
           </div>
-          <p className="text-xs text-muted-foreground mb-4" style={{ fontFamily: 'var(--font-sans)' }}>
+
+          <div className="relative mx-auto aspect-[2/1.55] sm:aspect-[2.1/1.35] w-full max-w-[380px] sm:max-w-[560px]">
+            <svg viewBox="0 0 400 260" className="absolute inset-0 h-full w-full overflow-visible">
+              <defs>
+                <linearGradient id="tuner-neutral" x1="0%" x2="100%" y1="0%" y2="0%">
+                  <stop offset="0%" stopColor="oklch(0.60 0.18 255 / 0.35)" />
+                  <stop offset="50%" stopColor="oklch(0.62 0.16 145 / 0.45)" />
+                  <stop offset="100%" stopColor="oklch(0.60 0.18 255 / 0.35)" />
+                </linearGradient>
+              </defs>
+
+              <path
+                d={describeArc(200, 184, 132, TUNER_LEFT_ANGLE, TUNER_RIGHT_ANGLE)}
+                fill="none"
+                stroke="oklch(0.50 0.04 250 / 0.18)"
+                strokeWidth="7"
+                strokeLinecap="round"
+              />
+              <path
+                d={describeArc(200, 184, 126, 246, 294)}
+                fill="none"
+                stroke="url(#tuner-neutral)"
+                strokeWidth="26"
+                strokeLinecap="round"
+              />
+
+              {TUNER_TICK_VALUES.map((cents) => {
+                const angle = centsToAngle(cents);
+                const isMajor = cents % 10 === 0;
+                const outer = polarToCartesian(200, 184, isMajor ? 141 : 138, angle);
+                const inner = polarToCartesian(200, 184, isMajor ? 122 : 128, angle);
+                const label = polarToCartesian(200, 184, 160, angle);
+                const nearCenter = Math.abs(cents) <= 10;
+                return (
+                  <g key={cents}>
+                    <line
+                      x1={inner.x}
+                      y1={inner.y}
+                      x2={outer.x}
+                      y2={outer.y}
+                      stroke={
+                        nearCenter
+                          ? 'oklch(0.76 0.22 132 / 0.9)'
+                          : 'oklch(0.56 0.16 255 / 0.6)'
+                      }
+                      strokeWidth={isMajor ? 3.5 : 1.8}
+                      strokeLinecap="round"
+                    />
+                    {TUNER_MAJOR_LABELS.has(cents) && (
+                      <text
+                        x={label.x}
+                        y={label.y + 4}
+                        textAnchor="middle"
+                        className="fill-muted-foreground"
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}
+                      >
+                        {cents}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+
+              {tunerDisplay && (
+                <>
+                  {(() => {
+                    const needleAngle = centsToAngle(tunerDisplay.note.cents);
+                    const needleTip = polarToCartesian(200, 184, 114, needleAngle);
+                    return (
+                      <line
+                        x1="200"
+                        y1="184"
+                        x2={needleTip.x}
+                        y2={needleTip.y}
+                        stroke={Math.abs(tunerDisplay.note.cents) <= 5 ? 'oklch(0.62 0.16 145)' : 'oklch(0.60 0.18 255)'}
+                        strokeWidth="4"
+                        strokeLinecap="round"
+                      />
+                    );
+                  })()}
+                  <circle
+                    cx="200"
+                    cy="184"
+                    r="12"
+                    fill={Math.abs(tunerDisplay.note.cents) <= 5 ? 'oklch(0.76 0.22 132)' : 'oklch(0.25 0.03 250)'}
+                    opacity="0.9"
+                  />
+                </>
+              )}
+            </svg>
+
+            <div className="absolute inset-0 flex flex-col items-center justify-end sm:justify-center pb-2 sm:pb-6 text-center pointer-events-none">
+              {tunerDisplay ? (
+                <>
+                  <div className="hidden sm:flex items-center gap-4">
+                    <div className="flex items-baseline gap-1">
+                      <span
+                        className="text-6xl font-light tracking-tight text-foreground leading-none"
+                        style={{ fontFamily: 'var(--font-mono)' }}
+                      >
+                        {tunerDisplay.note.name}
+                      </span>
+                      <span className="text-2xl text-muted-foreground leading-none" style={{ fontFamily: 'var(--font-mono)' }}>
+                        {tunerDisplay.note.octave}
+                      </span>
+                    </div>
+                    <div className="min-w-[6rem] rounded-2xl border border-border/60 bg-background/70 px-4 py-3 shadow-sm backdrop-blur-sm">
+                      <div className="text-5xl font-light leading-none text-[#8ab4ff]" style={{ fontFamily: 'var(--font-mono)' }}>
+                        {Math.round(Math.abs(tunerDisplay.note.cents))}¢
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-2 sm:mt-3 flex items-center gap-2">
+                    {Math.abs(tunerDisplay.note.cents) <= 5 ? (
+                      <CheckCircle2 size={18} className="text-[#9ef01a]" />
+                    ) : (
+                      <span className="inline-block h-2 w-2 rounded-full bg-[#8ab4ff]" />
+                    )}
+                    <span className="text-[11px] sm:text-xs uppercase tracking-[0.22em] sm:tracking-[0.35em] text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
+                      {Math.abs(tunerDisplay.note.cents) <= 5 ? 'In tune' : 'Noisy'}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-3xl sm:text-4xl text-muted-foreground/50" style={{ fontFamily: 'var(--font-mono)' }}>
+                    —
+                  </div>
+                  <div className="mt-3 text-[11px] sm:text-xs uppercase tracking-[0.22em] sm:tracking-[0.35em] text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {tunerOn ? 'Listening' : 'Turn tuner on'}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="absolute left-1/2 top-[57%] h-[42%] w-[54%] -translate-x-1/2 rounded-[48%] bg-[radial-gradient(circle_at_top,_oklch(0.22_0.06_185_/_0.85),_transparent_72%)] opacity-40 blur-[1px] pointer-events-none" />
+          </div>
+
+          {tunerDisplay && (
+            <div className="sm:hidden mt-3 flex items-end justify-center gap-3 rounded-xl border border-border/60 bg-background/70 px-3 py-2">
+              <div className="flex items-baseline gap-1">
+                <span className="text-4xl font-light tracking-tight text-foreground leading-none" style={{ fontFamily: 'var(--font-mono)' }}>
+                  {tunerDisplay.note.name}
+                </span>
+                <span className="text-lg text-muted-foreground leading-none" style={{ fontFamily: 'var(--font-mono)' }}>
+                  {tunerDisplay.note.octave}
+                </span>
+              </div>
+              <div className="text-3xl font-light leading-none text-[#8ab4ff]" style={{ fontFamily: 'var(--font-mono)' }}>
+                {Math.round(Math.abs(tunerDisplay.note.cents))}¢
+              </div>
+            </div>
+          )}
+
+          <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-[0.22em] sm:tracking-[0.3em] text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
+            <span>Flat</span>
+            <span>{tunerDisplay ? `${Math.round(tunerDisplay.hz)} Hz` : 'No signal'}</span>
+            <span>Sharp</span>
+          </div>
+
+          <p className="mt-3 text-xs text-muted-foreground" style={{ fontFamily: 'var(--font-sans)' }}>
             {isRecording
               ? 'Uses the same microphone as recording. Turn on to see pitch while you capture.'
               : tunerOn
-                ? 'Play or sing a steady note. Center the needle for correct pitch (A4 = 440 Hz).'
+                ? 'Play or sing a steady note. Center the needle for correct pitch.'
                 : 'Turn on to tune your instrument or check your vocal pitch before recording.'}
           </p>
-          <div className="flex flex-col sm:flex-row sm:items-end gap-5">
-            <div className="flex items-baseline gap-1 min-w-[6.5rem]">
-              {tunerDisplay ? (
-                <>
-                  <span
-                    className="text-5xl font-light tracking-tight text-foreground"
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  >
-                    {tunerDisplay.note.name}
-                  </span>
-                  <span className="text-2xl text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
-                    {tunerDisplay.note.octave}
-                  </span>
-                </>
-              ) : (
-                <span className="text-3xl text-muted-foreground/50" style={{ fontFamily: 'var(--font-mono)' }}>
-                  —
-                </span>
-              )}
-            </div>
-            <div className="flex-1 min-w-0 space-y-1">
-              <div
-                className="flex justify-between text-[10px] text-muted-foreground uppercase tracking-wider"
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                <span>Flat</span>
-                <span>{tunerDisplay ? `${Math.round(tunerDisplay.hz)} Hz` : '\u00a0'}</span>
-                <span>Sharp</span>
-              </div>
-              <div className="relative h-3 rounded-full bg-secondary border border-border/40 overflow-hidden">
-                <div
-                  className="absolute inset-y-0 w-px bg-foreground/25 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
-                  aria-hidden
-                />
-                <div
-                  className="absolute inset-y-0 rounded-full transition-[left,background-color] duration-75 ease-out pointer-events-none"
-                  style={{
-                    left: tunerDisplay
-                      ? `${Math.max(0, Math.min(100, 50 + Math.max(-50, Math.min(50, tunerDisplay.note.cents))))}%`
-                      : '50%',
-                    width: '4px',
-                    transform: 'translateX(-50%)',
-                    backgroundColor:
-                      tunerDisplay && Math.abs(tunerDisplay.note.cents) < 5
-                        ? 'oklch(0.62 0.16 145)'
-                        : recordType === 'voice'
-                          ? 'oklch(0.60 0.18 255)'
-                          : 'oklch(0.68 0.16 55)',
-                  }}
-                />
-              </div>
-              <p
-                className="text-center text-xs text-muted-foreground tabular-nums min-h-[1rem]"
-                style={{ fontFamily: 'var(--font-mono)' }}
-              >
-                {tunerDisplay
-                  ? `${tunerDisplay.note.cents > 0 ? '+' : ''}${tunerDisplay.note.cents.toFixed(0)} cents`
-                  : '\u00a0'}
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* Waveform canvas */}
