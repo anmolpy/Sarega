@@ -3,8 +3,10 @@
  * Design: "Ink & Paper" editorial — search bar, filter chips, card layout
  */
 import { useEffect, useState, useMemo } from 'react';
-import { Search } from 'lucide-react';
+import { Search, PenLine, Music } from 'lucide-react';
+import { useLocation } from 'wouter';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { getAllNotes, deleteNote, seedIfEmpty, type Note, type NoteType } from '@/lib/db';
 import { NOTE_TYPE_CONFIG } from '@/lib/noteHelpers';
 import NoteCard from '@/components/NoteCard';
@@ -23,6 +25,7 @@ export default function Notes() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<NoteType | 'all'>('all');
+  const [, navigate] = useLocation();
 
   useEffect(() => {
     async function load() {
@@ -65,6 +68,23 @@ export default function Notes() {
         <p className="text-sm text-muted-foreground mb-6" style={{ fontFamily: 'var(--font-sans)' }}>
           Browse and search all your musical ideas.
         </p>
+
+        <div className="flex flex-wrap gap-2 mb-6">
+          <Button
+            variant="outline"
+            onClick={() => navigate('/note/new-text')}
+            className="gap-2"
+          >
+            <PenLine size={14} /> New Text Note
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => navigate('/note/new-chord')}
+            className="gap-2"
+          >
+            <Music size={14} /> New Chord Sheet
+          </Button>
+        </div>
       </motion.div>
 
       {/* Search bar */}

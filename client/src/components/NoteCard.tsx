@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { Trash2 } from 'lucide-react';
-import type { Note } from '@/lib/db';
+import { getAllSongs, type Note, type Song } from '@/lib/db';
 import { NOTE_TYPE_CONFIG, formatTimestamp } from '@/lib/noteHelpers';
 import NoteIcon from './NoteIcon';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +14,19 @@ interface NoteCardProps {
 
 export default function NoteCard({ note, onDelete }: NoteCardProps) {
   const config = NOTE_TYPE_CONFIG[note.type];
+  const [songs, setSongs] = useState<Song[]>([]);
+
+  useEffect(() => {
+    async function loadSongs() {
+      const allSongs = await getAllSongs();
+      setSongs(allSongs);
+    }
+    void loadSongs();
+  }, []);
+
+  const songName = note.songId
+    ? (songs.find((song) => song.id === note.songId)?.title ?? 'none')
+    : 'none';
 
   return (
     <motion.div
@@ -40,18 +54,24 @@ export default function NoteCard({ note, onDelete }: NoteCardProps) {
                 </p>
               </div>
             </div>
-            {onDelete && (
-              <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onDelete(note.id);
-                }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 size={14} />
-              </button>
-            )}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground" style={{ fontFamily: 'var(--font-mono)' }}>
+                Song: {songName}
+              </span>
+
+              {onDelete && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onDelete(note.id);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
           </div>
           {note.tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-3">

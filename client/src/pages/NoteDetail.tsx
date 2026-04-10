@@ -17,7 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
 import {
-  getNoteById, saveNote, deleteNote, type Note, type TextNote, type ChordSheetNote,
+  getNoteById, saveNote, deleteNote, getAllSongs, assignNoteToSong,
+  type Note, type TextNote, type ChordSheetNote, type Song,
   type DrumPatternNote, type VoiceMemoNote, type InstrumentNote,
 } from '@/lib/db';
 import { NOTE_TYPE_CONFIG, formatTimestamp, formatDuration, generateId } from '@/lib/noteHelpers';
@@ -35,6 +36,8 @@ export default function NoteDetail() {
   const [editTags, setEditTags] = useState('');
   const [editBody, setEditBody] = useState('');
   const [editLines, setEditLines] = useState<{ chord: string; lyrics: string }[]>([]);
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [songId, setSongId] = useState('');
 
   // Audio playback
   const [isPlaying, setIsPlaying] = useState(false);
@@ -55,6 +58,11 @@ export default function NoteDetail() {
 
   // Create new note handlers
   useEffect(() => {
+    async function loadSongs() {
+      const allSongs = await getAllSongs();
+      setSongs(allSongs);
+    }
+
     async function load() {
       if (id === 'new-text') {
         const now = Date.now();
@@ -103,6 +111,7 @@ export default function NoteDetail() {
         return;
       }
       setNote(n);
+      setSongId(n.songId ?? '');
       setEditTitle(n.title);
       setEditTags(n.tags.join(', '));
       if (n.type === 'text') setEditBody(n.body);
@@ -114,6 +123,7 @@ export default function NoteDetail() {
       }
       setLoading(false);
     }
+    void loadSongs();
     load();
     return () => {
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
@@ -149,6 +159,20 @@ export default function NoteDetail() {
     await deleteNote(note.id);
     toast.success('Note deleted');
     navigate('/notes');
+  };
+
+  const handleSongAssign = async (nextSongId: string) => {
+    if (!note) return;
+    await assignNoteToSong(note.id, nextSongId || null);
+    setSongId(nextSongId);
+    setNote((prev) => (prev ? { ...prev, songId: nextSongId || null, updatedAt: Date.now() } : prev));
+
+    if (nextSongId) {
+      const selected = songs.find((song) => song.id === nextSongId);
+      toast.success(`Added to ${selected?.title ?? 'song'}`);
+    } else {
+      toast.success('Removed from song');
+    }
   };
 
   // Audio playback
@@ -279,6 +303,21 @@ export default function NoteDetail() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {!editing && id !== 'new-text' && id !== 'new-chord' && (
+              <select
+                value={songId}
+                onChange={(e) => void handleSongAssign(e.target.value)}
+                className="h-8 rounded-md border border-border/60 bg-background px-2 text-xs text-muted-foreground"
+                style={{ fontFamily: 'var(--font-mono)' }}
+                aria-label="Assign note to song"
+              >
+                <option value="">Song: none</option>
+                {songs.map((song) => (
+                  <option key={song.id} value={song.id}>{song.title}</option>
+                ))}
+              </select>
+            )}
+
             {!editing && (note.type === 'text' || note.type === 'chord') && (
               <Button
                 variant="outline"

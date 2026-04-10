@@ -1,11 +1,12 @@
 import { useLocation } from 'wouter';
-import { Home, FileText, Mic, LayoutGrid } from 'lucide-react';
+import { Home, FileText, Mic, LayoutGrid, FolderTree } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { ReactNode } from 'react';
 
 const navItems = [
   { path: '/', label: 'Home', icon: Home },
   { path: '/notes', label: 'Notes', icon: FileText },
+  { path: '/songs', label: 'Songs', icon: FolderTree },
   { path: '/record', label: 'Record', icon: Mic },
   { path: '/drummer', label: 'Drummer', icon: LayoutGrid },
 ];

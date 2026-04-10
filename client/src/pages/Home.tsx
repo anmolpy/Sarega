@@ -77,7 +77,7 @@ export default function Home() {
               Sarega
             </h1>
             <p className="text-muted-foreground mt-2 max-w-md text-sm leading-relaxed" style={{ fontFamily: 'var(--font-sans)' }}>
-              Capture melodies, lyrics, rhythms, and chords — all in one place.
+              Capture melodies, lyrics, rhythms, and chords.
             </p>
           </motion.div>
         </div>

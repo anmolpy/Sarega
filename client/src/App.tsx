@@ -10,6 +10,7 @@ import Notes from "./pages/Notes";
 import NoteDetail from "./pages/NoteDetail";
 import Record from "./pages/Record";
 import Drummer from "./pages/Drummer";
+import Songs from "./pages/Songs";
 
 function Router() {
   return (
@@ -20,6 +21,7 @@ function Router() {
         <Route path="/note/:id" component={NoteDetail} />
         <Route path="/record" component={Record} />
         <Route path="/drummer" component={Drummer} />
+        <Route path="/songs" component={Songs} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>

@@ -16,6 +16,14 @@ export interface NoteBase {
   tags: string[];
   createdAt: number;
   updatedAt: number;
+  songId?: string | null;
+}
+
+export interface Song {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface VoiceMemoNote extends NoteBase {
@@ -59,6 +67,14 @@ interface SaregaDB extends DBSchema {
     indexes: {
       'by-type': NoteType;
       'by-updated': number;
+      'by-song': string;
+    };
+  };
+  songs: {
+    key: string;
+    value: Song;
+    indexes: {
+      'by-updated': number;
     };
   };
 }
@@ -69,11 +85,25 @@ let dbPromise: Promise<IDBPDatabase<SaregaDB>> | null = null;
 
 function getDB(): Promise<IDBPDatabase<SaregaDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<SaregaDB>('sarega-db', 1, {
-      upgrade(db) {
-        const store = db.createObjectStore('notes', { keyPath: 'id' });
-        store.createIndex('by-type', 'type');
-        store.createIndex('by-updated', 'updatedAt');
+    dbPromise = openDB<SaregaDB>('sarega-db', 2, {
+      upgrade(db, oldVersion, _newVersion, tx) {
+        if (oldVersion < 1) {
+          const store = db.createObjectStore('notes', { keyPath: 'id' });
+          store.createIndex('by-type', 'type');
+          store.createIndex('by-updated', 'updatedAt');
+        }
+
+        if (oldVersion < 2) {
+          const notesStore = tx.objectStore('notes');
+          if (!notesStore.indexNames.contains('by-song')) {
+            notesStore.createIndex('by-song', 'songId');
+          }
+
+          if (!db.objectStoreNames.contains('songs')) {
+            const songsStore = db.createObjectStore('songs', { keyPath: 'id' });
+            songsStore.createIndex('by-updated', 'updatedAt');
+          }
+        }
       },
     });
   }
@@ -107,6 +137,55 @@ export async function saveNote(note: Note): Promise<void> {
 export async function deleteNote(id: string): Promise<void> {
   const db = await getDB();
   await db.delete('notes', id);
+}
+
+export async function assignNoteToSong(noteId: string, songId: string | null): Promise<void> {
+  const db = await getDB();
+  const note = await db.get('notes', noteId);
+  if (!note) return;
+  const updated = {
+    ...note,
+    songId,
+    updatedAt: Date.now(),
+  } as Note;
+  await db.put('notes', updated);
+}
+
+export async function getNotesBySong(songId: string): Promise<Note[]> {
+  const db = await getDB();
+  const notes = await db.getAllFromIndex('notes', 'by-song', songId);
+  return notes.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function getAllSongs(): Promise<Song[]> {
+  const db = await getDB();
+  const songs = await db.getAll('songs');
+  return songs.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function getSongById(id: string): Promise<Song | undefined> {
+  const db = await getDB();
+  return db.get('songs', id);
+}
+
+export async function saveSong(song: Song): Promise<void> {
+  const db = await getDB();
+  await db.put('songs', song);
+}
+
+export async function deleteSong(id: string): Promise<void> {
+  const db = await getDB();
+  const allNotes = await db.getAll('notes');
+  const tx = db.transaction(['notes', 'songs'], 'readwrite');
+
+  for (const note of allNotes) {
+    if (note.songId === id) {
+      await tx.objectStore('notes').put({ ...note, songId: null, updatedAt: Date.now() } as Note);
+    }
+  }
+
+  await tx.objectStore('songs').delete(id);
+  await tx.done;
 }
 
 export async function getNotesCount(): Promise<number> {
