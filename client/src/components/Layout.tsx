@@ -16,7 +16,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -37,7 +37,7 @@ export default function Layout({ children }: LayoutProps) {
             return (
               <button
                 key={item.path}
-                onClick={() => window.location.href = item.path}
+                onClick={() => navigate(item.path)}
                 className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors relative bg-transparent border-none cursor-pointer"
               >
                 <Icon
