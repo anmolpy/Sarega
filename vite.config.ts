@@ -4,9 +4,11 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { defineConfig } from "vite";
 
+
 const PROJECT_ROOT = import.meta.dirname;
 
 const plugins = [react(), tailwindcss(), jsxLocPlugin()];
+
 
 export default defineConfig({
   plugins,
@@ -19,6 +21,7 @@ export default defineConfig({
   },
   envDir: path.resolve(import.meta.dirname),
   root: path.resolve(import.meta.dirname, "client"),
+  base: "/Sarega/",
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
